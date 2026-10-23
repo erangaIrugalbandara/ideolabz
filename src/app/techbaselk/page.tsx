@@ -52,11 +52,87 @@ export default function TechBaseLKHome() {
     let width = 0;
     let height = 0;
 
+    type HeroParticle = {
+      x: number;
+      y: number;
+      vx: number;
+      vy: number;
+      size: number;
+      opacity: number;
+    };
+
+    const particles: HeroParticle[] = [];
+
+    const getTargetCount = (w: number, h: number) => {
+      // Scale count smoothly based on screen width & area so density remains consistent across all desktop/laptop resolutions
+      const fromWidth = Math.floor(w / 11);
+      const fromArea = Math.floor((w * h) / 11000);
+      return Math.max(70, Math.min(Math.max(fromWidth, fromArea), 220));
+    };
+
+    const spawnParticle = (w: number, h: number, x?: number, y?: number): HeroParticle => ({
+      x: x !== undefined ? x : Math.random() * w,
+      y: y !== undefined ? y : Math.random() * h,
+      vx: (Math.random() - 0.5) * 0.4,
+      vy: (Math.random() - 0.5) * 0.4,
+      size: Math.random() * 2.2 + 0.8,
+      opacity: Math.random() * 0.65 + 0.2,
+    });
+
     const updateSize = () => {
       const hero = canvas.parentElement;
-      width = canvas.width = hero ? hero.clientWidth : window.innerWidth;
-      height = canvas.height = hero ? hero.clientHeight : window.innerHeight;
+      const rect = hero ? hero.getBoundingClientRect() : null;
+      const newWidth = Math.ceil(rect ? rect.width : window.innerWidth) || window.innerWidth || 800;
+      const newHeight = Math.ceil(rect ? rect.height : window.innerHeight) || window.innerHeight || 600;
+
+      if (newWidth <= 0 || newHeight <= 0) return;
+      if (newWidth === width && newHeight === height) return;
+
+      const prevWidth = width;
+      const prevHeight = height;
+
+      width = canvas.width = newWidth;
+      height = canvas.height = newHeight;
+
+      const targetCount = getTargetCount(newWidth, newHeight);
+
+      if (prevWidth > 0 && prevHeight > 0) {
+        // The screen size changed (window resize, snap, or monitor drag-and-drop)
+        const scaleX = newWidth / prevWidth;
+        const scaleY = newHeight / prevHeight;
+
+        // 1. Proportionally reposition existing particles so they immediately span the entire new canvas dimensions
+        for (let i = 0; i < particles.length; i++) {
+          particles[i].x *= scaleX;
+          particles[i].y *= scaleY;
+
+          // Clamping safeguards
+          if (particles[i].x < 0 || particles[i].x > newWidth) {
+            particles[i].x = Math.random() * newWidth;
+          }
+          if (particles[i].y < 0 || particles[i].y > newHeight) {
+            particles[i].y = Math.random() * newHeight;
+          }
+        }
+
+        // 2. If the canvas expanded, immediately spawn additional particles uniformly across the canvas
+        if (particles.length < targetCount) {
+          const needed = targetCount - particles.length;
+          for (let k = 0; k < needed; k++) {
+            particles.push(spawnParticle(newWidth, newHeight));
+          }
+        } else if (particles.length > targetCount + 30) {
+          particles.splice(targetCount);
+        }
+      } else {
+        // Initial spawn covering the entire screen
+        particles.length = 0;
+        for (let i = 0; i < targetCount; i++) {
+          particles.push(spawnParticle(newWidth, newHeight));
+        }
+      }
     };
+
     updateSize();
 
     // Mouse tracking
@@ -79,29 +155,6 @@ export default function TechBaseLKHome() {
 
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseout', handleMouseLeave);
-
-    // Increase particles floating in hero section (~150 on desktop)
-    const particles: {
-      x: number;
-      y: number;
-      vx: number;
-      vy: number;
-      size: number;
-      opacity: number;
-    }[] = [];
-
-    const particleCount = Math.min(Math.floor(window.innerWidth / 8), 150);
-
-    for (let i = 0; i < particleCount; i++) {
-      particles.push({
-        x: Math.random() * (width || window.innerWidth),
-        y: Math.random() * (height || window.innerHeight),
-        vx: (Math.random() - 0.5) * 0.4,
-        vy: (Math.random() - 0.5) * 0.4,
-        size: Math.random() * 2.2 + 0.8,
-        opacity: Math.random() * 0.65 + 0.2,
-      });
-    }
 
     let animId: number;
 
@@ -214,8 +267,21 @@ export default function TechBaseLKHome() {
 
     window.addEventListener('resize', updateSize);
 
+    // ResizeObserver ensures instantaneous detection when dragging between monitors or snapping
+    let resizeObserver: ResizeObserver | null = null;
+    const heroElem = canvas.parentElement;
+    if (heroElem && typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(() => {
+        updateSize();
+      });
+      resizeObserver.observe(heroElem);
+    }
+
     return () => {
       cancelAnimationFrame(animId);
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
       window.removeEventListener('resize', updateSize);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseout', handleMouseLeave);
